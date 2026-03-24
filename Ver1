@@ -1,0 +1,1739 @@
+Command !jeweler-menu
+
+var Jeweler = Jeweler || (function () {
+    'use strict';
+
+    var SCRIPT = 'Jeweler';
+    var VERSION = '0.3.6';
+    var STATE = 'JEWELER_API';
+
+    var CONFIG = {
+        coinAttrs: {
+            gp: 'gp',
+            sp: 'sp',
+            cp: 'cp'
+        },
+        baseMonthlyWageGp: 100,
+        reactionAttr: 'reactionbonus',
+        raceData: {
+            human: { label: 'Human', jewelerBonus: 0, gemcutterBonus: 0, wageMult: 1 },
+            dwarf: { label: 'Dwarf', jewelerBonus: 20, gemcutterBonus: 0, wageMult: 2 },
+            gnome: { label: 'Gnome', jewelerBonus: 0, gemcutterBonus: 30, wageMult: 2 }
+        },
+        workDays: {
+            appraisal: 1,
+            ring: 7,
+            bracelet_sculpt: 14,
+            bracelet_stones: 21,
+            crown: 365,
+            gemcut: 7
+        },
+        colors: {
+            panelBg: '#111111',
+            panelBorder: '#666666',
+            text: '#f0f0f0',
+            subtext: '#cccccc',
+            primaryBg: '#2c5aa0',
+            primaryBorder: '#6fa8ff',
+            reportBg: '#2c5aa0',
+            reportBorder: '#6fa8ff',
+            warnBg: '#2c5aa0',
+            warnBorder: '#6fa8ff',
+            dangerBg: '#8b1d1d',
+            dangerBorder: '#d96a6a',
+            gmBg: '#4b2e83',
+            gmBorder: '#9b7bd6'
+        },
+        randomNames: [
+            'Aldren', 'Belis', 'Cadrin', 'Dovin', 'Eldra', 'Fenric', 'Galen', 'Hadria', 'Ivrin', 'Jessa',
+            'Kelven', 'Liora', 'Merris', 'Nollan', 'Orla', 'Perris', 'Quillan', 'Rhesa', 'Serik', 'Talan',
+            'Uldra', 'Varen', 'Wessa', 'Yorin', 'Zerin'
+        ]
+    };
+
+    var GEM_CATALOG = {
+        ornamental: [
+            ['Azurite', 10], ['Banded Agate', 10], ['Blue Quartz', 10], ['Eye Agate', 10], ['Hematite', 10], ['Lapis Lazuli', 10],
+            ['Malachite', 10], ['Moss Agate', 10], ['Obsidian', 10], ['Rhodochrosite', 10], ['Tiger Eye', 10], ['Turquoise', 10]
+        ],
+        semi: [
+            ['Bloodstone', 50], ['Carnelian', 50], ['Chalcedony', 50], ['Chrysoprase', 50], ['Citrine', 50], ['Jasper', 50],
+            ['Moonstone', 50], ['Onyx', 50], ['Rock Crystal', 50], ['Sardonyx', 50], ['Smoky Quartz', 50], ['Star Rose Quartz', 50], ['Zircon', 50]
+        ],
+        fancy: [
+            ['Amber', 100], ['Alexandrite', 100], ['Amethyst', 100], ['Aquamarine', 500], ['Chrysoberyl', 100], ['Coral', 100],
+            ['Garnet', 500], ['Jade', 100], ['Jet', 100], ['Pearl', 500], ['Peridot', 500], ['Spinel', 500], ['Topaz', 500], ['Tourmaline', 100]
+        ],
+        gem: [
+            ['Black Opal', 1000], ['Black Sapphire', 5000], ['Diamond', 5000], ['Emerald', 1000], ['Fire Opal', 1000], ['Jacinth', 5000],
+            ['Opal', 1000], ['Oriental Amethyst', 1000], ['Oriental Emerald', 5000], ['Oriental Topaz', 1000], ['Ruby', 5000], ['Sapphire', 1000],
+            ['Star Ruby', 1000], ['Star Sapphire', 1000]
+        ]
+    };
+
+    var JEWELRY_FORMS = ['Bracelet', 'Brooch', 'Crown', 'Earrings', 'Necklace', 'Pendant', 'Ring', 'Tiara'];
+
+    function stateInit() {
+        if (!state[STATE]) {
+            state[STATE] = {
+                version: VERSION,
+                nextJewelerId: 1,
+                nextQuoteId: 1,
+                nextJobId: 1,
+                jewelers: [],
+                quotes: [],
+                jobs: []
+            };
+        }
+        state[STATE].jewelers = state[STATE].jewelers || [];
+        state[STATE].quotes = state[STATE].quotes || [];
+        state[STATE].jobs = state[STATE].jobs || [];
+        state[STATE].nextJewelerId = state[STATE].nextJewelerId || 1;
+        state[STATE].nextQuoteId = state[STATE].nextQuoteId || 1;
+        state[STATE].nextJobId = state[STATE].nextJobId || 1;
+        state[STATE].version = VERSION;
+    }
+
+    function esc(s) {
+        return String(s === undefined || s === null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function normalizeText(s) {
+        return String(s || '').toLowerCase().replace(/\s+/g, '');
+    }
+
+    function clamp(n, min, max) {
+        n = Number(n) || 0;
+        return Math.max(min, Math.min(max, n));
+    }
+
+    function randomIntegerInclusive(min, max) {
+        return randomInteger(max - min + 1) + min - 1;
+    }
+
+    function randomName() {
+        return CONFIG.randomNames[randomInteger(CONFIG.randomNames.length) - 1];
+    }
+
+    function randomHaggleFailComment() {
+        var comments = [
+            'That is my price.', 'Do not waste my time.', 'You ask too much of me.', 'I know the worth of my work.',
+            'You can pay it or leave it.', 'This is fine work, not market scrap.', 'I will not be talked down so easily.',
+            'You press too hard.', 'The price stands.', 'I have other clients.', 'You bargain like a fishwife.',
+            'I have already been fair.', 'Push me again and the price may rise.', 'Good work is never cheap.', 'My tools do not swing for free.'
+        ];
+        return comments[randomInteger(comments.length) - 1];
+    }
+
+    function randomJewelerSaleComment() {
+        var comments = [
+            'I can move it quickly, but only at a dealer\'s price.',
+            'Selling is never as good as buying.',
+            'I take the risk, so I take the margin.',
+            'I can pay now, but not at full value.',
+            'That is fair coin for a quick sale.',
+            'I still have to find the next buyer.',
+            'If you want full value, keep it yourself.',
+            'Ready coin always comes at a discount.',
+            'I can do better only if you give me a reason.',
+            'A jeweler must leave room for profit.'
+        ];
+        return comments[randomInteger(comments.length) - 1];
+    }
+
+    function randomPick(arr) {
+        return arr[randomInteger(arr.length) - 1];
+    }
+
+    function parseArgs(content) {
+        var args = {};
+        (content.match(/--[^\s|]+(?:\|(?:[^\s]| (?!--))*)?/g) || []).forEach(function (part) {
+            var idx = part.indexOf('|');
+            var key = part.substring(2, idx > -1 ? idx : undefined);
+            var val = idx > -1 ? part.substring(idx + 1) : 'yes';
+            args[key] = val;
+        });
+        return args;
+    }
+
+    function send(msg) {
+        sendChat(SCRIPT, '/direct ' + msg);
+    }
+
+    function sendGM(msg) {
+        sendChat(SCRIPT, '/w gm ' + msg);
+    }
+
+    function box(title, body) {
+        return '<div style="background:' + CONFIG.colors.panelBg + ';border:1px solid ' + CONFIG.colors.panelBorder +
+            ';padding:8px;color:' + CONFIG.colors.text + ';max-width:520px;">' +
+            '<div style="font-weight:bold;font-size:18px;margin-bottom:6px;">' + esc(title) + '</div>' +
+            body + '</div>';
+    }
+
+    function line(label, value) {
+        return '<div style="margin:2px 0;"><b>' + esc(label) + ':</b> ' + value + '</div>';
+    }
+
+    function menuBtn(label, command, bg, border, width) {
+        width = width || 110;
+        return '<a style="display:inline-block;text-align:center;margin:2px;padding:4px 6px;min-width:' + width +
+            'px;background:' + bg + ';border:1px solid ' + border + ';color:#fff;text-decoration:none;border-radius:3px;" href="' +
+            esc(command) + '">' + esc(label) + '</a>';
+    }
+
+    function menuSection(title, buttons) {
+        return '<div style="margin-top:8px;border-top:1px solid #444;padding-top:6px;">' +
+            '<div style="font-weight:bold;color:' + CONFIG.colors.subtext + ';margin-bottom:4px;">' + esc(title) + '</div>' +
+            buttons.join(' ') + '</div>';
+    }
+
+    function backMenuButton(pcId) {
+        return '<div style="margin-top:8px;">' +
+            menuBtn('Main Menu', '!jeweler-menu' + (pcId ? ' --pc|' + pcId : ''), CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 92) +
+            '</div>';
+    }
+
+    function selectedCharacter(msg) {
+        if (!msg.selected || !msg.selected.length) return null;
+        var tok = getObj('graphic', msg.selected[0]._id);
+        if (!tok) return null;
+        var charId = tok.get('represents');
+        if (!charId) return null;
+        return getObj('character', charId);
+    }
+
+    function resolveBuyer(msg, args) {
+        var ch = selectedCharacter(msg);
+        if (ch) return ch;
+        if (args.pc) return getObj('character', args.pc);
+        return null;
+    }
+
+    function getBuyerName(buyer) {
+        return buyer ? (buyer.get('name') || 'Buyer') : 'Buyer';
+    }
+
+    function getReactionBonus(buyer) {
+        if (!buyer) return 0;
+        return Number(getAttr(buyer.id, CONFIG.reactionAttr, 0)) || 0;
+    }
+
+    function getAttrObj(charId, name) {
+        var found = findObjs({ type: 'attribute', characterid: charId, name: name })[0];
+        if (!found) {
+            found = createObj('attribute', { characterid: charId, name: name, current: 0 });
+        }
+        return found;
+    }
+
+    function getAttr(charId, name, defVal) {
+        var obj = findObjs({ type: 'attribute', characterid: charId, name: name })[0];
+        if (!obj) return defVal;
+        var v = obj.get('current');
+        return v === '' || v === undefined || v === null ? defVal : v;
+    }
+
+    function setAttr(charId, name, val) {
+        getAttrObj(charId, name).set('current', val);
+    }
+
+    function coinSummary(charId) {
+        return {
+            gp: Number(getAttr(charId, CONFIG.coinAttrs.gp, 0)) || 0,
+            sp: Number(getAttr(charId, CONFIG.coinAttrs.sp, 0)) || 0,
+            cp: Number(getAttr(charId, CONFIG.coinAttrs.cp, 0)) || 0
+        };
+    }
+
+    function cpTotal(charId) {
+        var c = coinSummary(charId);
+        return (c.gp * 100) + (c.sp * 10) + c.cp;
+    }
+
+    function formatCoinsFromCp(totalCp) {
+        totalCp = Math.max(0, Math.floor(totalCp || 0));
+        var gp = Math.floor(totalCp / 100);
+        var rem = totalCp % 100;
+        var sp = Math.floor(rem / 10);
+        var cp = rem % 10;
+        return gp + ' gp, ' + sp + ' sp, ' + cp + ' cp';
+    }
+
+    function gpToCp(gp) {
+        return Math.max(0, Math.round((Number(gp) || 0) * 100));
+    }
+
+    function cpToGp(cp) {
+        return Math.round((Number(cp) || 0)) / 100;
+    }
+
+    function formatCoinsFromGp(gp) {
+        return formatCoinsFromCp(gpToCp(gp));
+    }
+
+    function jewelryHasGems(desc) {
+        desc = normalizeText(desc || '');
+        return desc.indexOf('gems') !== -1;
+    }
+
+    function randRangeInt(min, max) {
+        min = Number(min) || 0;
+        max = Number(max) || 0;
+        if (max < min) {
+            var t = min; min = max; max = t;
+        }
+        return randomInteger(max - min + 1) + min - 1;
+    }
+
+    function gemValueStepsGp() {
+        return [0.01, 0.05, 0.1, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+    }
+
+    function nearestGemStepIndex(baseGp) {
+        var steps = gemValueStepsGp();
+        var best = 0, bestDiff = Infinity;
+        _.each(steps, function (v, i) {
+            var diff = Math.abs(v - baseGp);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = i;
+            }
+        });
+        return best;
+    }
+
+    function rollGemTrueValue(baseGp) {
+        var steps = gemValueStepsGp();
+        var startIdx = nearestGemStepIndex(baseGp);
+        var currentIdx = startIdx;
+        var upMoves = 0, downMoves = 0;
+        var log = [];
+
+        function nextHigherAllowed(maxRoll) {
+            var r;
+            do { r = randomInteger(10); } while (r > maxRoll);
+            return r;
+        }
+        function nextLowerAllowed() {
+            var r;
+            do { r = randomInteger(10); } while (r < 2);
+            return r;
+        }
+        function applyRoll(roll) {
+            if (roll === 1) {
+                if (upMoves < 7 && currentIdx < steps.length - 1) {
+                    currentIdx += 1;
+                    upMoves += 1;
+                }
+                var rr = nextHigherAllowed(8);
+                log.push('1 -> next higher base, reroll=' + rr);
+                applyRoll(rr);
+            } else if (roll === 2) {
+                // double the exact base entered
+                var doubled = Math.max(0.01, Number(baseGp) || 0) * 2;
+                log.push('2 -> double entered base');
+                currentIdx = null;
+                log.push('double');
+                return doubled;
+            } else if (roll === 3) {
+                var d6 = randomInteger(6);
+                var pct = d6 * 10;
+                log.push('3 -> +' + pct + '%');
+                return steps[currentIdx] * (1 + pct / 100);
+            } else if (roll >= 4 && roll <= 8) {
+                log.push(String(roll) + ' -> unchanged');
+                return steps[currentIdx];
+            } else if (roll === 9) {
+                var d4 = randomInteger(4);
+                var pct2 = d4 * 10;
+                log.push('9 -> -' + pct2 + '%');
+                return steps[currentIdx] * (1 - pct2 / 100);
+            } else { // 10 / 0
+                if (downMoves < 5 && currentIdx > 0) {
+                    currentIdx -= 1;
+                    downMoves += 1;
+                }
+                var rr2 = nextLowerAllowed();
+                log.push('0 -> next lower base, reroll=' + rr2);
+                applyRoll(rr2);
+            }
+        }
+
+        var first = randomInteger(10);
+        log.push('d10=' + first);
+        var val = applyRoll(first);
+        if (typeof val !== 'number' || !isFinite(val)) {
+            val = steps[currentIdx];
+        }
+        return {
+            baseInputGp: baseGp,
+            finalGp: Math.max(0.01, Math.round(val * 100) / 100),
+            log: log.join('; ')
+        };
+    }
+
+    function rollJewelryBase() {
+        var d100 = randomInteger(100);
+        var data;
+        if (d100 <= 10) data = { min: 100, max: 1000, desc: 'Ivory or wrought silver' };
+        else if (d100 <= 20) data = { min: 200, max: 1200, desc: 'Wrought silver and gold' };
+        else if (d100 <= 40) data = { min: 300, max: 1800, desc: 'Wrought gold' };
+        else if (d100 <= 50) data = { min: 500, max: 3000, desc: 'Jade, coral or wrought platinum' };
+        else if (d100 <= 70) data = { min: 1000, max: 6000, desc: 'Silver with gems' };
+        else if (d100 <= 90) data = { min: 2000, max: 8000, desc: 'Gold with gems' };
+        else data = { min: 2000, max: 12000, desc: 'Platinum with gems' };
+        data.roll = d100;
+        data.baseGp = randRangeInt(data.min, data.max);
+        return data;
+    }
+
+    function maybeExceptionalJewelry(data) {
+        var workmanshipRoll = randomInteger(10);
+        var log = ['d10 workmanship=' + workmanshipRoll];
+        if (workmanshipRoll !== 1) {
+            return {
+                baseGp: data.baseGp,
+                desc: data.desc,
+                log: log.join('; ')
+            };
+        }
+        // on 1, either highest in class or next higher class
+        var up = randomInteger(2) === 2;
+        log.push(up ? 'exceptional -> next class' : 'exceptional -> highest in class');
+        if (!up) {
+            return { baseGp: data.max, desc: data.desc, log: log.join('; ') };
+        }
+        // promote by re-rolling in next higher class if possible
+        var promotedRoll = Math.min(100, data.roll + 20);
+        var promoted;
+        if (promotedRoll <= 10) promoted = { min: 100, max: 1000, desc: 'Ivory or wrought silver', roll: promotedRoll };
+        else if (promotedRoll <= 20) promoted = { min: 200, max: 1200, desc: 'Wrought silver and gold', roll: promotedRoll };
+        else if (promotedRoll <= 40) promoted = { min: 300, max: 1800, desc: 'Wrought gold', roll: promotedRoll };
+        else if (promotedRoll <= 50) promoted = { min: 500, max: 3000, desc: 'Jade, coral or wrought platinum', roll: promotedRoll };
+        else if (promotedRoll <= 70) promoted = { min: 1000, max: 6000, desc: 'Silver with gems', roll: promotedRoll };
+        else if (promotedRoll <= 90) promoted = { min: 2000, max: 8000, desc: 'Gold with gems', roll: promotedRoll };
+        else promoted = { min: 2000, max: 12000, desc: 'Platinum with gems', roll: promotedRoll };
+        promoted.baseGp = randRangeInt(promoted.min, promoted.max);
+        var inner = maybeExceptionalJewelry(promoted);
+        return { baseGp: inner.baseGp, desc: inner.desc, log: log.concat(inner.log).join('; ') };
+    }
+
+    function rollJewelryTrueValue() {
+        var base = rollJewelryBase();
+        var resolved = maybeExceptionalJewelry(base);
+        var finalGp = resolved.baseGp;
+        var log = ['d100 class=' + base.roll, 'base=' + base.baseGp + ' gp', resolved.log];
+        if (jewelryHasGems(resolved.desc)) {
+            var d8 = randomInteger(8);
+            log.push('d8 gem exceptional=' + d8);
+            if (d8 === 1) {
+                var bonus = 5000;
+                finalGp += bonus;
+                while (finalGp < 640000 && randomInteger(6) === 1) {
+                    bonus *= 2;
+                    finalGp += bonus;
+                    log.push('d6 chain 1 -> bonus now ' + bonus);
+                }
+            }
+        }
+        return {
+            baseGp: resolved.baseGp,
+            finalGp: finalGp,
+            desc: resolved.desc,
+            log: log.join('; ')
+        };
+    }
+
+    function rollCommodityValue(kind, args) {
+        var log = [];
+        if (kind === 'fur') {
+            var prices = {
+                beaver: { pelt: 2, trimming: 20, cape: 200, coat: 400 },
+                ermine: { pelt: 4, trimming: 120, cape: 3600, coat: 7200 },
+                fox: { pelt: 3, trimming: 30, cape: 300, coat: 600 },
+                marten: { pelt: 4, trimming: 40, cape: 400, coat: 800 },
+                mink: { pelt: 3, trimming: 90, cape: 2700, coat: 5400 },
+                muskrat: { pelt: 1, trimming: 10, cape: 100, coat: 200 },
+                sable: { pelt: 5, trimming: 150, cape: 4500, coat: 9000 },
+                seal: { pelt: 5, trimming: 25, cape: 125, coat: 250 }
+            };
+            var type = normalizeText(args.furtype || 'beaver');
+            var form = normalizeText(args.furform || 'pelt');
+            if (form === 'capeorjacket') form = 'cape';
+            var qty = Math.max(1, Number(args.quantity) || 1);
+            var base = ((prices[type] || prices.beaver)[form] || prices.beaver.pelt) * qty;
+            var d10 = randomInteger(10);
+            var modMap = {1:-10,2:-20,3:-30,4:-40,5:0,6:0,7:0,8:0,9:10,10:20};
+            var pct = modMap[d10];
+            log.push('d10=' + d10 + ' => ' + pct + '%');
+            return { baseGp: base, finalGp: Math.round(base * (1 + pct/100) * 100) / 100, desc: 'Fur appraisal', log: log.join('; ') };
+        }
+        var qty2 = Math.max(1, Number(args.quantity) || 1);
+        var ranges = {
+            brocade: [1,20,'square yard'],
+            incense: [5,30,'stick'],
+            ivory: [3,6,'pound'],
+            pepper: [1,1,'ounce'],
+            perfume: [1,6,'dram'],
+            silk: [1,3,'square yard'],
+            spice: [0.1,0.4,'scruple'],
+            unguent: [10,60,'gill']
+        };
+        var key = normalizeText(args.commodity || 'ivory');
+        var r = ranges[key] || ranges.ivory;
+        var total = 0;
+        for (var i = 0; i < qty2; i++) {
+            if (r[0] === r[1]) total += r[0];
+            else total += (Math.round((Math.random() * (r[1]-r[0]) + r[0]) * 100) / 100);
+        }
+        return { baseGp: 0, finalGp: Math.round(total*100)/100, desc: 'Commodity appraisal', log: qty2 + ' ' + r[2] + '(s)' };
+    }
+
+    function estimateJewelryAppraisal(args) {
+        var hidden = rollJewelryTrueValue();
+        var claimedBase = Number(args.basevalue || 0) || 0;
+        return {
+            baseValueGp: claimedBase || hidden.baseGp,
+            trueValueGp: hidden.finalGp,
+            hiddenDesc: hidden.desc,
+            hiddenLog: hidden.log
+        };
+    }
+
+    function estimateGemAppraisal(args) {
+        var base = Number(args.basevalue || 0) || 0;
+        var hidden = rollGemTrueValue(base);
+        return {
+            baseValueGp: base,
+            trueValueGp: hidden.finalGp,
+            hiddenDesc: 'Gem',
+            hiddenLog: hidden.log
+        };
+    }
+
+    function estimateCommodityAppraisal(args) {
+        var sub = normalizeText(args.subkind || 'commodity');
+        var hidden = rollCommodityValue(sub, args);
+        return {
+            baseValueGp: hidden.baseGp || 0,
+            trueValueGp: hidden.finalGp,
+            hiddenDesc: hidden.desc,
+            hiddenLog: hidden.log
+        };
+    }
+
+    function deductCoins(charId, gpCost) {
+        var costCp = Math.max(0, Math.ceil((Number(gpCost) || 0) * 100));
+        var total = cpTotal(charId);
+        if (total < costCp) return { ok: false, needCp: costCp, haveCp: total };
+        total -= costCp;
+        var gp = Math.floor(total / 100);
+        var rem = total % 100;
+        var sp = Math.floor(rem / 10);
+        var cp = rem % 10;
+        setAttr(charId, CONFIG.coinAttrs.gp, gp);
+        setAttr(charId, CONFIG.coinAttrs.sp, sp);
+        setAttr(charId, CONFIG.coinAttrs.cp, cp);
+        return { ok: true, spentCp: costCp, remainingCp: total };
+    }
+
+
+    function addCoins(charId, gpAmount) {
+        var addCp = Math.max(0, Math.round((Number(gpAmount) || 0) * 100));
+        var total = cpTotal(charId) + addCp;
+        var gp = Math.floor(total / 100);
+        var rem = total % 100;
+        var sp = Math.floor(rem / 10);
+        var cp = rem % 10;
+        setAttr(charId, CONFIG.coinAttrs.gp, gp);
+        setAttr(charId, CONFIG.coinAttrs.sp, sp);
+        setAttr(charId, CONFIG.coinAttrs.cp, cp);
+        return { ok: true, addedCp: addCp, totalCp: total };
+    }
+
+    function appraisalFeeGp(buyer) {
+        var base = randomIntegerInclusive(1, 5);
+        var rb = getReactionBonus(buyer);
+        var fee = Math.round(base * (1 - (rb / 100)) * 100) / 100;
+        return Math.max(1, Math.min(5, fee));
+    }
+
+    function playerIsGMFor(msg) {
+        return playerIsGM(msg.playerid);
+    }
+
+    function allJewelers() {
+        return state[STATE].jewelers;
+    }
+
+    function allQuotes() {
+        return state[STATE].quotes;
+    }
+
+    function allJobs() {
+        return state[STATE].jobs;
+    }
+
+    function getJewelerById(id) {
+        return _.find(allJewelers(), function (j) { return j.id === id; });
+    }
+
+    function getQuotesForBuyer(buyerId) {
+        return _.filter(allQuotes(), function (q) { return q.buyerId === buyerId; });
+    }
+
+    function getJobsForBuyer(buyerId) {
+        return _.filter(allJobs(), function (j) { return j.buyerId === buyerId && j.status !== 'done'; });
+    }
+
+    function getOpenJobsForJeweler(jewelerId) {
+        return _.filter(allJobs(), function (j) { return j.jewelerId === jewelerId && j.status !== 'done'; });
+    }
+
+    function makeJewelerId() {
+        return 'J' + (state[STATE].nextJewelerId++);
+    }
+    function makeQuoteId() {
+        return 'Q' + (state[STATE].nextQuoteId++);
+    }
+    function makeJobId() {
+        return 'JOB' + (state[STATE].nextJobId++);
+    }
+
+    function jewelerSkillTier(roll) {
+        roll = clamp(roll, 1, 100);
+        if (roll <= 20) return { code: 'fair', label: 'Fair', primaryPct: 10, primaryLikely: 90, fallbackPct: 0 };
+        if (roll <= 50) return { code: 'good', label: 'Good', primaryPct: 20, primaryLikely: 50, fallbackPct: 10 };
+        if (roll <= 75) return { code: 'superior', label: 'Superior', primaryPct: 30, primaryLikely: 60, fallbackPct: 10 };
+        if (roll <= 90) return { code: 'excellent', label: 'Excellent', primaryPct: 40, primaryLikely: 70, fallbackPct: 10 };
+        return { code: 'masterful', label: 'Masterful', primaryPct: 40, primaryLikely: 60, fallbackPct: 20 };
+    }
+
+    function gemcutterSkillTier(roll) {
+        roll = clamp(roll, 1, 100);
+        if (roll <= 30) return { code: 'shaky', label: 'Shaky', die: 12, improve: [1], ruin: [10,11,12] };
+        if (roll <= 60) return { code: 'fair', label: 'Fair', die: 12, improve: [1,2], ruin: [12] };
+        if (roll <= 90) return { code: 'good', label: 'Good', die: 12, improve: [1,2,3], ruin: [12] };
+        return { code: 'superb', label: 'Superb', die: 20, improve: [1,2,3,4,5], ruin: [20] };
+    }
+
+    function jewelerResultPct(jeweler) {
+        var tier = jewelerSkillTier(jeweler.jewelerRollAdjusted);
+        var roll = randomInteger(100);
+        var pct = (roll <= tier.primaryLikely) ? tier.primaryPct : tier.fallbackPct;
+        return { pct: pct, tier: tier, roll: roll };
+    }
+
+    function gemcutOutcome(jeweler) {
+        var tier = gemcutterSkillTier(jeweler.gemcutterRollAdjusted);
+        var dieRoll = randomInteger(tier.die);
+        var improve = _.contains(tier.improve, dieRoll);
+        var ruin = _.contains(tier.ruin, dieRoll);
+        return { improve: improve, ruin: ruin, tier: tier, die: tier.die, roll: dieRoll };
+    }
+
+    function monthlyWageForJeweler(j) {
+        var race = CONFIG.raceData[normalizeText(j.race)] || CONFIG.raceData.human;
+        return CONFIG.baseMonthlyWageGp * race.wageMult;
+    }
+
+    function serviceChargeForDays(j, days) {
+        days = Math.max(1, Number(days) || 1);
+        return Math.max(1, Math.ceil((monthlyWageForJeweler(j) * days) / 30));
+    }
+
+    function addJeweler(owner, name, race) {
+        var raceKey = normalizeText(race);
+        if (!CONFIG.raceData[raceKey]) raceKey = 'human';
+        var raceInfo = CONFIG.raceData[raceKey];
+        var jewelerBase = randomInteger(100);
+        var gemBase = randomInteger(100);
+        var jewelerAdj = clamp(jewelerBase + raceInfo.jewelerBonus, 1, 100);
+        var gemAdj = clamp(gemBase + raceInfo.gemcutterBonus, 1, 100);
+        var jeweler = {
+            id: makeJewelerId(),
+            name: name || randomName(),
+            race: raceKey,
+            ownerId: owner ? owner.id : '',
+            ownerName: owner ? owner.get('name') : '',
+            jewelerRollBase: jewelerBase,
+            jewelerRollAdjusted: jewelerAdj,
+            gemcutterRollBase: gemBase,
+            gemcutterRollAdjusted: gemAdj,
+            created: Date.now()
+        };
+        allJewelers().push(jeweler);
+        return jeweler;
+    }
+
+    function jewelerLabel(j) {
+        var raceInfo = CONFIG.raceData[normalizeText(j.race)] || CONFIG.raceData.human;
+        return j.name + ' (' + raceInfo.label + ')' + (j.ownerName ? ' — kept by ' + j.ownerName : '');
+    }
+
+    function availableJewelerButtons(pcId, kind) {
+        var jewelers = _.sortBy(allJewelers(), function (j) { return (j.name || '').toLowerCase(); });
+        if (!jewelers.length) return '<div>No jeweler-gemcutters are available.</div>';
+        return _.map(jewelers, function (j) {
+            return menuBtn(jewelerLabel(j), '!jeweler-start-quote --pc|' + pcId + ' --kind|' + kind + ' --jeweler|' + j.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 210);
+        }).join(' ');
+    }
+
+    function jewelryKindLabel(kind) {
+        switch (kind) {
+            case 'ring': return 'Simple Ring';
+            case 'bracelet_sculpt': return 'Bracelet with Sculpting';
+            case 'bracelet_stones': return 'Bracelet with Stones Set';
+            case 'crown': return 'Crown';
+            case 'custom': return 'Custom Jewelry Work';
+            default: return kind;
+        }
+    }
+
+    function roundGp(n) {
+        return Math.round((Number(n) || 0) * 100) / 100;
+    }
+
+    function setQuotePayments(quote) {
+        if (quote.kind === 'sale') {
+            quote.depositGp = 0;
+            quote.balanceGp = 0;
+            return;
+        }
+        if (quote.paymentMode === 'upfront') {
+            quote.depositGp = roundGp(quote.currentServiceChargeGp || quote.serviceChargeGp || 0);
+            quote.balanceGp = 0;
+        } else {
+            var total = roundGp(quote.currentServiceChargeGp || quote.serviceChargeGp || 0);
+            quote.depositGp = roundGp(total / 2);
+            quote.balanceGp = roundGp(total - quote.depositGp);
+        }
+    }
+
+    function saleOfferGp(appraisedGp, buyer) {
+        var discount = randomIntegerInclusive(15, 20) - (getReactionBonus(buyer) || 0);
+        discount = Math.max(0, Math.min(95, discount));
+        return {
+            offerGp: roundGp(appraisedGp * (1 - discount / 100)),
+            discountPct: discount
+        };
+    }
+
+    function jewelerAskPriceGp(trueValueGp, buyer) {
+        var markup = randomIntegerInclusive(10, 35) - Math.floor((getReactionBonus(buyer) || 0) / 2);
+        markup = Math.max(0, markup);
+        return roundGp(trueValueGp * (1 + markup / 100));
+    }
+
+    function generateStoreInventory(size, buyer) {
+        var cfg = {
+            small: { gemsMin: 2, gemsMax: 5, jewelryMin: 0, jewelryMax: 2, gemBuckets: ['ornamental','ornamental','semi','semi','fancy'] },
+            medium: { gemsMin: 4, gemsMax: 8, jewelryMin: 1, jewelryMax: 4, gemBuckets: ['ornamental','semi','semi','fancy','fancy','gem'] },
+            large: { gemsMin: 7, gemsMax: 14, jewelryMin: 3, jewelryMax: 7, gemBuckets: ['semi','semi','fancy','fancy','gem','gem'] }
+        }[normalizeText(size || 'small')] || { gemsMin: 2, gemsMax: 5, jewelryMin: 0, jewelryMax: 2, gemBuckets: ['ornamental','semi','fancy'] };
+        var out = { gems: [], jewelry: [] };
+        var gemCount = randomIntegerInclusive(cfg.gemsMin, cfg.gemsMax);
+        var jewelryCount = randomIntegerInclusive(cfg.jewelryMin, cfg.jewelryMax);
+        var i, bucket, entry, rolled, item;
+        for (i = 0; i < gemCount; i++) {
+            bucket = randomPick(cfg.gemBuckets);
+            entry = randomPick(GEM_CATALOG[bucket]);
+            rolled = rollGemTrueValue(entry[1]);
+            item = {
+                name: entry[0],
+                category: bucket,
+                baseGp: entry[1],
+                trueValueGp: rolled.finalGp,
+                askGp: jewelerAskPriceGp(rolled.finalGp, buyer)
+            };
+            out.gems.push(item);
+        }
+        for (i = 0; i < jewelryCount; i++) {
+            rolled = rollJewelryTrueValue();
+            item = {
+                name: randomPick(JEWELRY_FORMS),
+                desc: rolled.desc,
+                baseGp: rolled.baseGp,
+                trueValueGp: rolled.finalGp,
+                askGp: jewelerAskPriceGp(rolled.finalGp, buyer)
+            };
+            out.jewelry.push(item);
+        }
+        return out;
+    }
+
+    function createQuote(buyer, jeweler, kind, args) {
+        var baseValue = Number(args.basevalue || 0) || 0;
+        var days = Number(args.days || 0) || 0;
+        var serviceDays = days;
+        var detailText = '';
+        var itemType = '';
+        var appraisalData = null;
+        var paymentMode = 'halfdown';
+        var baseService = 0;
+        var offerInfo = null;
+        if (kind === 'gemappraisal' || kind === 'appraisal') {
+            serviceDays = CONFIG.workDays.appraisal;
+            itemType = 'gem';
+            detailText = 'Gem appraisal';
+            appraisalData = estimateGemAppraisal(args);
+            baseValue = appraisalData.baseValueGp;
+            paymentMode = 'upfront';
+            baseService = appraisalFeeGp(buyer);
+        } else if (kind === 'jewelryappraisal') {
+            serviceDays = CONFIG.workDays.appraisal;
+            itemType = 'jewelry';
+            detailText = 'Jewelry appraisal';
+            appraisalData = estimateJewelryAppraisal(args);
+            baseValue = appraisalData.baseValueGp;
+            paymentMode = 'upfront';
+            baseService = appraisalFeeGp(buyer);
+        } else if (kind === 'commodityappraisal') {
+            serviceDays = CONFIG.workDays.appraisal;
+            itemType = 'commodity';
+            detailText = normalizeText(args.subkind || 'commodity') === 'fur' ? 'Fur appraisal' : 'Rare commodity appraisal';
+            appraisalData = estimateCommodityAppraisal(args);
+            baseValue = appraisalData.baseValueGp;
+            paymentMode = 'upfront';
+            baseService = appraisalFeeGp(buyer);
+        } else if (kind === 'sale') {
+            serviceDays = 0;
+            itemType = normalizeText(args.itemtype || 'item');
+            detailText = 'Dealer purchase offer';
+            baseValue = Number(args.appraisedvalue || 0) || 0;
+            offerInfo = saleOfferGp(baseValue, buyer);
+            baseService = 0;
+            paymentMode = 'sale';
+        } else if (kind === 'gemcut') {
+            serviceDays = CONFIG.workDays.gemcut;
+            itemType = 'gem';
+            detailText = 'Gem cutting attempt';
+            baseService = serviceChargeForDays(jeweler, serviceDays);
+        } else {
+            itemType = 'jewelry';
+            serviceDays = CONFIG.workDays[args.jobtype] || CONFIG.workDays.ring;
+            detailText = jewelryKindLabel(args.jobtype || 'ring');
+            baseService = serviceChargeForDays(jeweler, serviceDays);
+        }
+
+        var quote = {
+            id: makeQuoteId(),
+            buyerId: buyer.id,
+            buyerName: buyer.get('name') || '',
+            jewelerId: jeweler.id,
+            jewelerName: jeweler.name,
+            kind: kind,
+            itemName: args.itemname || 'Unnamed item',
+            itemType: itemType,
+            jobtype: args.jobtype || '',
+            baseValueGp: baseValue,
+            trueValueGp: appraisalData ? appraisalData.trueValueGp : (Number(args.truevalue || 0) || 0),
+            appraisalHiddenDesc: appraisalData ? appraisalData.hiddenDesc : '',
+            appraisalHiddenLog: appraisalData ? appraisalData.hiddenLog : '',
+            days: serviceDays,
+            serviceChargeGp: baseService,
+            currentServiceChargeGp: baseService,
+            baseServiceChargeGp: baseService,
+            depositGp: 0,
+            balanceGp: 0,
+            paymentMode: paymentMode,
+            reactionBonus: getReactionBonus(buyer),
+            haggleAttempts: 0,
+            haggleFailures: 0,
+            haggleDone: false,
+            lastHaggleComment: '',
+            detailText: detailText,
+            created: Date.now(),
+            offerGp: offerInfo ? offerInfo.offerGp : 0,
+            currentOfferGp: offerInfo ? offerInfo.offerGp : 0,
+            baseOfferGp: offerInfo ? offerInfo.offerGp : 0,
+            discountPct: offerInfo ? offerInfo.discountPct : 0,
+            sourceJobId: args.sourcejob || ''
+        };
+        setQuotePayments(quote);
+        allQuotes().push(quote);
+        return quote;
+    }
+
+    function removeQuote(id) {
+        state[STATE].quotes = _.reject(allQuotes(), function (q) { return q.id === id; });
+    }
+
+    function getSaleQuoteForSourceJob(jobId) {
+        return _.find(allQuotes(), function (q) { return q.kind === 'sale' && q.sourceJobId === jobId; });
+    }
+
+    function ensureDealerOfferQuoteForJob(job) {
+        var buyer, jeweler;
+        if (!job || !(job.kind === 'appraisal' || job.kind === 'gemappraisal' || job.kind === 'jewelryappraisal' || job.kind === 'commodityappraisal')) return null;
+        if (getSaleQuoteForSourceJob(job.id)) return getSaleQuoteForSourceJob(job.id);
+        buyer = getObj('character', job.buyerId);
+        jeweler = getJewelerById(job.jewelerId);
+        if (!buyer || !jeweler) return null;
+        return createQuote(buyer, jeweler, 'sale', {
+            itemname: job.itemName,
+            itemtype: job.itemType,
+            appraisedvalue: String(job.trueValueGp || 0),
+            sourcejob: job.id
+        });
+    }
+
+    function acceptQuote(buyer, quote) {
+        var upfrontGp = Number(quote.depositGp) || 0;
+        var spend = deductCoins(buyer.id, upfrontGp);
+        if (!spend.ok) {
+            return { ok: false, spend: spend };
+        }
+        var job = {
+            id: makeJobId(),
+            buyerId: quote.buyerId,
+            buyerName: quote.buyerName,
+            jewelerId: quote.jewelerId,
+            jewelerName: quote.jewelerName,
+            kind: quote.kind,
+            itemName: quote.itemName,
+            itemType: quote.itemType,
+            jobtype: quote.jobtype,
+            baseValueGp: quote.baseValueGp,
+            trueValueGp: quote.trueValueGp,
+            appraisalHiddenDesc: quote.appraisalHiddenDesc || '',
+            appraisalHiddenLog: quote.appraisalHiddenLog || '',
+            daysTotal: quote.days,
+            daysRemaining: quote.days,
+            serviceChargeGp: quote.currentServiceChargeGp || quote.serviceChargeGp,
+            depositGp: quote.depositGp || 0,
+            balanceGp: quote.balanceGp || 0,
+            status: 'working',
+            created: Date.now()
+        };
+        allJobs().push(job);
+        removeQuote(quote.id);
+        return { ok: true, job: job, spend: spend };
+    }
+
+    function acceptSaleQuote(buyer, quote) {
+        var paid = addCoins(buyer.id, quote.currentOfferGp || quote.offerGp || 0);
+        removeQuote(quote.id);
+        return { ok: true, paid: paid, offerGp: quote.currentOfferGp || quote.offerGp || 0 };
+    }
+
+    function resolveCompletedJob(job) {
+        var jeweler = getJewelerById(job.jewelerId);
+        var publicBody = line('Jeweler', esc(job.jewelerName)) + line('Item', esc(job.itemName));
+        var gmBody = line('Buyer', esc(job.buyerName)) + line('Jeweler', esc(job.jewelerName));
+        if (jeweler) {
+            gmBody += line('Jeweler skill raw', String(jeweler.jewelerRollAdjusted)) + line('Gemcutter skill raw', String(jeweler.gemcutterRollAdjusted));
+        }
+
+        if (job.kind === 'appraisal' || job.kind === 'gemappraisal') {
+            publicBody += line('Base value', formatCoinsFromGp(job.baseValueGp)) + line('True value', formatCoinsFromGp(job.trueValueGp));
+            gmBody += line('Gem appraisal', esc(job.appraisalHiddenLog || ''));
+        } else if (job.kind === 'jewelryappraisal') {
+            publicBody += line('Base value', formatCoinsFromGp(job.baseValueGp)) + line('True value', formatCoinsFromGp(job.trueValueGp));
+            gmBody += line('Jewelry class', esc(job.appraisalHiddenDesc || '')) + line('Jewelry appraisal', esc(job.appraisalHiddenLog || ''));
+        } else if (job.kind === 'commodityappraisal') {
+            if (job.baseValueGp) publicBody += line('Base value', formatCoinsFromGp(job.baseValueGp));
+            publicBody += line('True value', formatCoinsFromGp(job.trueValueGp));
+            gmBody += line('Commodity appraisal', esc(job.appraisalHiddenLog || ''));
+        } else if (job.kind === 'jewelry') {
+            var jres = jewelerResultPct(jeweler);
+            var finalValue = Math.round(job.baseValueGp * (1 + (jres.pct / 100)) * 100) / 100;
+            publicBody += line('Work', esc(jewelryKindLabel(job.jobtype || 'custom'))) +
+                line('Original value', formatCoinsFromGp(job.baseValueGp)) +
+                line('Improvement', '+' + esc(String(jres.pct)) + '%') +
+                line('Final value', formatCoinsFromGp(finalValue));
+            gmBody += line('Jeweler tier', esc(jres.tier.label)) +
+                line('Chance roll', String(jres.roll) + ' vs ' + String(jres.tier.primaryLikely) + '%') +
+                line('Increase applied', '+' + String(jres.pct) + '%');
+        } else if (job.kind === 'gemcut') {
+            var gout = gemcutOutcome(jeweler);
+            if (gout.ruin) {
+                publicBody += line('Result', 'The stone was ruined in the cutting.');
+            } else if (gout.improve) {
+                var gres = jewelerResultPct(jeweler);
+                var gfinal = Math.round(job.baseValueGp * (1 + (gres.pct / 100)) * 100) / 100;
+                publicBody += line('Original value', formatCoinsFromGp(job.baseValueGp)) +
+                    line('Result', 'The stone was improved.') +
+                    line('Improvement', '+' + esc(String(gres.pct)) + '%') +
+                    line('Final value', formatCoinsFromGp(gfinal));
+                gmBody += line('Gemcut roll', 'd' + gout.die + ' = ' + gout.roll) +
+                    line('Gemcut tier', esc(gout.tier.label)) +
+                    line('Jeweler value roll', '+' + String(gres.pct) + '%');
+            } else {
+                publicBody += line('Original value', formatCoinsFromGp(job.baseValueGp)) +
+                    line('Result', 'The stone was cut, but its value did not improve.');
+                gmBody += line('Gemcut roll', 'd' + gout.die + ' = ' + gout.roll) +
+                    line('Gemcut tier', esc(gout.tier.label));
+            }
+        }
+
+        job.status = (job.balanceGp && job.balanceGp > 0) ? 'ready' : 'done';
+        job.daysRemaining = 0;
+        var btns = '';
+        if (job.balanceGp && job.balanceGp > 0) {
+            btns += menuBtn('Finish/Pick Up', '!jeweler-pickup --pc|' + job.buyerId + ' --job|' + job.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 120);
+        }
+        if (job.kind === 'appraisal' || job.kind === 'gemappraisal' || job.kind === 'jewelryappraisal' || job.kind === 'commodityappraisal') {
+            ensureDealerOfferQuoteForJob(job);
+            publicBody += line('Dealer offer', 'Added to Open Quotes.');
+            btns += menuBtn('Open Quotes', '!jeweler-open-quotes --pc|' + job.buyerId, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 110);
+        }
+        btns += backMenuButton(job.buyerId);
+        publicBody += line('Paid now', formatCoinsFromGp(job.depositGp || 0)) + (job.balanceGp ? line('Balance due', formatCoinsFromGp(job.balanceGp)) : '') + '<div style="margin-top:8px;">' + btns + '</div>';
+        return {
+            publicHtml: box('Jeweler Job Complete', publicBody),
+            gmHtml: box('Jeweler GM Detail', gmBody)
+        };
+    }
+
+    function handleMenu(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var pcArg = buyer ? (' --pc|' + buyer.id) : '';
+        var header = buyer ? '<div style="color:' + CONFIG.colors.subtext + ';margin-bottom:4px;">Buyer: <b>' + esc(getBuyerName(buyer)) + '</b></div>' : '<div style="color:' + CONFIG.colors.subtext + ';margin-bottom:4px;">Select a buyer token first.</div>';
+        var body = header +
+            menuSection('1. Jewelers', [
+                menuBtn('Add Jeweler-Gemcutter', '!jeweler-add' + pcArg + ' --name|?{Name|' + randomName() + '} --race|?{Race|Human,human|Dwarf,dwarf|Gnome,gnome}', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 180),
+                menuBtn('Remove Jeweler', '!jeweler-remove-list' + pcArg, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 120),
+                menuBtn('Remove All', '!jeweler-remove-all' + pcArg + ' --confirm|?{Remove all jewelers, quotes, and jobs for this owner?|No,no|Yes,yes}', CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 100)
+            ]) +
+            menuSection('2. Services', [
+                menuBtn('Gem Appraisal', '!jeweler-select-service' + pcArg + ' --kind|gemappraisal', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 115),
+                menuBtn('Jewelry Appraisal', '!jeweler-select-service' + pcArg + ' --kind|jewelryappraisal', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 130),
+                menuBtn('Commodity Appraisal', '!jeweler-select-service' + pcArg + ' --kind|commodityappraisal', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 145),
+                menuBtn('Jewelry Work', '!jeweler-select-service' + pcArg + ' --kind|jewelry', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 120),
+                menuBtn('Gemcutting', '!jeweler-select-service' + pcArg + ' --kind|gemcut', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110),
+                menuBtn('Sell Item at Base Value Only', '!jeweler-select-service' + pcArg + ' --kind|sale', CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 180),
+                menuBtn('Purchase Stones', '!jeweler-store-list' + pcArg + ' --size|?{Store size|Small,small|Medium,medium|Large,large}', CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 120)
+            ]) +
+            menuSection('3. Tracking', [
+                menuBtn('Status Report', '!jeweler-report' + pcArg, CONFIG.colors.reportBg, CONFIG.colors.reportBorder, 110),
+                menuBtn('Open Quotes', '!jeweler-open-quotes' + pcArg, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100),
+                menuBtn('Apply Days', '!jeweler-apply-days' + pcArg + ' --days|?{Days passed|1}', CONFIG.colors.reportBg, CONFIG.colors.reportBorder, 95),
+                menuBtn('Ready for Pickup', '!jeweler-ready' + pcArg, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 125)
+            ]);
+
+        if (playerIsGMFor(msg)) {
+            body += menuSection('4. GM', [
+                menuBtn('Reset Campaign', '!jeweler-reset --confirm|?{Reset all Jeweler campaign data?|No,no|Yes,yes}', CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 130)
+            ]);
+        }
+
+        send(box('Jeweler Menu', body));
+    }
+
+    function handleAddJeweler(msg, args) {
+        var owner = resolveBuyer(msg, args);
+        var jeweler;
+        if (!owner) {
+            send(box('Jeweler', 'Select a buyer/employer token first.' + backMenuButton('')));
+            return;
+        }
+        jeweler = addJeweler(owner, args.name, args.race);
+        send(box('Jeweler Added',
+            line('Name', esc(jeweler.name)) +
+            line('Race', esc((CONFIG.raceData[jeweler.race] || CONFIG.raceData.human).label)) +
+            line('Kept by', esc(owner.get('name') || '')) +
+            line('Monthly wage reference', esc(String(monthlyWageForJeweler(jeweler))) + ' gp') +
+            line('Note', 'Skill tables are hidden from players.') +
+            backMenuButton(owner.id)
+        ));
+        sendGM(box('Jeweler GM Detail',
+            line('Name', esc(jeweler.name)) +
+            line('Race', esc((CONFIG.raceData[jeweler.race] || CONFIG.raceData.human).label)) +
+            line('Jeweler skill roll', String(jeweler.jewelerRollAdjusted) + ' (' + jewelerSkillTier(jeweler.jewelerRollAdjusted).label + ')') +
+            line('Gemcutter skill roll', String(jeweler.gemcutterRollAdjusted) + ' (' + gemcutterSkillTier(jeweler.gemcutterRollAdjusted).label + ')')
+        ));
+    }
+
+
+    function handleSelectService(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        var kind = args.kind || 'gemappraisal';
+        var titleMap = {
+            gemappraisal: 'Choose a Jeweler for Gem Appraisal',
+            jewelryappraisal: 'Choose a Jeweler for Jewelry Appraisal',
+            commodityappraisal: 'Choose a Jeweler for Commodity Appraisal',
+            gemcut: 'Choose a Jeweler for Gemcutting',
+            jewelry: 'Choose a Jeweler for Jewelry Work',
+            sale: 'Choose a Jeweler for Sale Offer at Base Value Only'
+        };
+        send(box(titleMap[kind] || 'Choose a Jeweler', availableJewelerButtons(buyer.id, kind) + backMenuButton(buyer.id)));
+    }
+
+
+    function handleStartQuote(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var jeweler = getJewelerById(args.jeweler);
+        if (!buyer || !jeweler) {
+            send(box('Jeweler', 'Buyer or jeweler not found.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        var body = line('Buyer', esc(getBuyerName(buyer))) +
+            line('Jeweler', esc(jewelerLabel(jeweler)));
+
+        if (args.kind === 'gemappraisal' || args.kind === 'appraisal') {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Create Gem Appraisal Quote',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|gemappraisal --jeweler|' + jeweler.id +
+                    ' --itemname|?{Stone name|Unset stone}' +
+                    ' --basevalue|?{Known base value in gp|100}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 180) +
+                '</div>';
+        } else if (args.kind === 'jewelryappraisal') {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Create Jewelry Appraisal Quote',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelryappraisal --jeweler|' + jeweler.id +
+                    ' --itemname|?{Jewelry piece name|Unset jewelry}' +
+                    ' --basevalue|?{Known base value in gp|100}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 190) +
+                '</div>';
+        } else if (args.kind === 'commodityappraisal') {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Fur', '!jeweler-quote --pc|' + buyer.id + ' --kind|commodityappraisal --subkind|fur --jeweler|' + jeweler.id +
+                    ' --itemname|?{Item name|Fur lot}' +
+                    ' --furtype|?{Fur type|Beaver,beaver|Ermine,ermine|Fox,fox|Marten,marten|Mink,mink|Muskrat,muskrat|Sable,sable|Seal,seal}' +
+                    ' --furform|?{Form|Pelt,pelt|Trimming,trimming|Cape or Jacket,capeorjacket|Coat,coat}' +
+                    ' --quantity|?{Quantity|1}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 80) +
+                menuBtn('Rare Commodity', '!jeweler-quote --pc|' + buyer.id + ' --kind|commodityappraisal --subkind|commodity --jeweler|' + jeweler.id +
+                    ' --itemname|?{Item name|Rare commodity}' +
+                    ' --commodity|?{Commodity|Brocade/Tapestry,brocade|Incense,incense|Ivory,ivory|Pepper,pepper|Perfume,perfume|Silk,silk|Spice,spice|Unguent,unguent}' +
+                    ' --quantity|?{Quantity of units|1}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 145) +
+                '</div>';
+        } else if (args.kind === 'gemcut') {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Create Gemcut Quote',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|gemcut --jeweler|' + jeweler.id +
+                    ' --itemname|?{Stone name|Unset stone}' +
+                    ' --basevalue|?{Current stone value in gp|100}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 170) +
+                '</div>';
+        } else if (args.kind === 'sale') {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Create Sale Offer at Base Value Only',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|sale --jeweler|' + jeweler.id +
+                    ' --itemname|?{Item name|Gem or jewelry}' +
+                    ' --itemtype|?{Type|Gem,gem|Jewelry,jewelry|Commodity,commodity}' +
+                    ' --appraisedvalue|?{Appraised value in gp|100}',
+                    CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 220) +
+                '</div>';
+        } else {
+            body += '<div style="margin-top:6px;">' +
+                menuBtn('Simple Ring',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelry --jeweler|' + jeweler.id +
+                    ' --jobtype|ring --itemname|?{Piece name|Ring} --basevalue|?{Current material value in gp|100}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 120) +
+                menuBtn('Bracelet Sculpted',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelry --jeweler|' + jeweler.id +
+                    ' --jobtype|bracelet_sculpt --itemname|?{Piece name|Bracelet} --basevalue|?{Current material value in gp|250}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 150) +
+                menuBtn('Bracelet Stones',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelry --jeweler|' + jeweler.id +
+                    ' --jobtype|bracelet_stones --itemname|?{Piece name|Stone-set bracelet} --basevalue|?{Current material value in gp|400}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 145) +
+                menuBtn('Crown',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelry --jeweler|' + jeweler.id +
+                    ' --jobtype|crown --itemname|?{Piece name|Crown} --basevalue|?{Current material value in gp|5000}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 100) +
+                menuBtn('Custom Piece',
+                    '!jeweler-quote --pc|' + buyer.id + ' --kind|jewelry --jeweler|' + jeweler.id +
+                    ' --jobtype|?{Work type|Simple Ring,ring|Bracelet with Sculpting,bracelet_sculpt|Bracelet with Stones Set,bracelet_stones|Crown,crown}' +
+                    ' --itemname|?{Piece name|Custom piece} --basevalue|?{Current material value in gp|500}',
+                    CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 115) +
+                '</div>';
+        }
+
+        send(box('Jeweler Service', body + backMenuButton(buyer.id)));
+    }
+
+
+    function handleQuote(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var jeweler = getJewelerById(args.jeweler);
+        var quote;
+        var body;
+        if (!buyer || !jeweler) {
+            send(box('Jeweler', 'Buyer or jeweler not found.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        quote = createQuote(buyer, jeweler, args.kind, args);
+        if (quote.kind === 'sale') {
+            body = line('Buyer', esc(quote.buyerName)) +
+                line('Dealer', esc(jewelerLabel(jeweler))) +
+                line('Item', esc(quote.itemName)) +
+                line('Appraised value', formatCoinsFromGp(quote.baseValueGp)) +
+                line('Dealer offer', formatCoinsFromGp(quote.currentOfferGp || quote.offerGp)) +
+                line('Offer discount', esc(String(quote.discountPct)) + '% below appraised value') +
+                line('Haggle target', esc(String(Math.max(0, Math.min(95, 10 + (Number(quote.reactionBonus) || 0))))) + '%') +
+                '<div style="margin-top:8px;">' +
+                menuBtn('Sell Item', '!jeweler-accept --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 100) +
+                menuBtn('Haggle Price', '!jeweler-haggle --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100) +
+                menuBtn('Deny Quote', '!jeweler-deny --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 100) +
+                '</div>' + backMenuButton(buyer.id);
+            send(box('Dealer Offer', body));
+            return;
+        }
+        body = line('Buyer', esc(quote.buyerName)) +
+            line('Jeweler', esc(jewelerLabel(jeweler))) +
+            line('Item', esc(quote.itemName)) +
+            line('Service', esc(quote.detailText)) +
+            (quote.baseValueGp ? line('Base value', formatCoinsFromGp(quote.baseValueGp)) : '') +
+            line('Time', esc(String(quote.days)) + ' day(s)') +
+            line('Total charge', formatCoinsFromGp(quote.currentServiceChargeGp || quote.serviceChargeGp)) +
+            line('Paid now', formatCoinsFromGp(quote.depositGp || 0)) +
+            (quote.balanceGp ? line('Balance on pickup', formatCoinsFromGp(quote.balanceGp || 0)) : '') +
+            line('Haggle target', esc(String(Math.max(0, Math.min(95, 10 + (Number(quote.reactionBonus) || 0))))) + '%') +
+            line('Result', 'Hidden rolls determine the final outcome when the work is finished.') +
+            '<div style="margin-top:8px;">' +
+            menuBtn('Accept Quote', '!jeweler-accept --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110) +
+            menuBtn('Haggle Price', '!jeweler-haggle --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100) +
+            menuBtn('Deny Quote', '!jeweler-deny --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 100) +
+            '</div>' +
+            backMenuButton(buyer.id);
+        send(box('Jeweler Quote', body));
+    }
+
+
+    function handleOpenQuotes(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        var quotes = getQuotesForBuyer(buyer.id);
+        if (!quotes.length) {
+            send(box('Jeweler Quotes', 'No open quotes for ' + esc(getBuyerName(buyer)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        var body = _.map(quotes, function (q) {
+            return '<div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #333;">' +
+                line('Jeweler', esc(q.jewelerName)) +
+                line('Item', esc(q.itemName)) +
+                line('Service', esc(q.detailText)) +
+                (q.baseValueGp ? line('Base value', formatCoinsFromGp(q.baseValueGp)) : '') +
+                (q.kind === 'sale' ? line('Dealer offer', formatCoinsFromGp(q.currentOfferGp || q.offerGp)) : line('Total charge', formatCoinsFromGp(q.currentServiceChargeGp || q.serviceChargeGp))) +
+                (q.kind === 'sale' ? '' : line('Paid now', formatCoinsFromGp(q.depositGp || 0))) +
+                ((q.kind !== 'sale' && q.balanceGp) ? line('Balance on pickup', formatCoinsFromGp(q.balanceGp || 0)) : '') +
+                line('Haggle target', esc(String(Math.max(0, Math.min(95, 10 + (Number(q.reactionBonus) || 0))))) + '%') +
+                (q.kind === 'sale' ? '' : line('Time', esc(String(q.days)) + ' day(s)')) +
+                menuBtn((q.kind === 'sale' ? 'Sell' : 'Accept'), '!jeweler-accept --pc|' + buyer.id + ' --quote|' + q.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 85) +
+                (!q.haggleDone ? menuBtn('Haggle', '!jeweler-haggle --pc|' + buyer.id + ' --quote|' + q.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 75) : '') +
+                menuBtn('Deny', '!jeweler-deny --pc|' + buyer.id + ' --quote|' + q.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 75) +
+                '</div>';
+        }).join('');
+        send(box('Jeweler Quotes', body + backMenuButton(buyer.id)));
+    }
+
+
+    function handleAccept(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var quote = _.find(allQuotes(), function (q) { return q.id === args.quote; });
+        var result;
+        if (!buyer || !quote || quote.buyerId !== buyer.id) {
+            send(box('Jeweler', 'Quote not found for this buyer.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        if (quote.kind === 'sale') {
+            result = acceptSaleQuote(buyer, quote);
+            send(box('Item Sold',
+                line('Item', esc(quote.itemName)) +
+                line('Dealer', esc(quote.jewelerName)) +
+                line('Amount received', formatCoinsFromGp(result.offerGp)) +
+                line('Reminder', 'Add this amount to your XP total if your campaign awards XP for treasure sold or turned in.') +
+                backMenuButton(buyer.id)
+            ));
+            return;
+        }
+        result = acceptQuote(buyer, quote);
+        if (!result.ok) {
+            send(box('Jeweler', 'Not enough coin. Need ' + esc(formatCoinsFromCp(result.spend.needCp)) + ', but only have ' + esc(formatCoinsFromCp(result.spend.haveCp)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        send(box('Jeweler Order Placed',
+            line('Item', esc(result.job.itemName)) +
+            line('Jeweler', esc(result.job.jewelerName)) +
+            line('Paid now', formatCoinsFromGp(result.job.depositGp || result.job.serviceChargeGp)) +
+            (result.job.balanceGp ? line('Balance on pickup', formatCoinsFromGp(result.job.balanceGp)) : '') +
+            line('Time to complete', esc(String(result.job.daysTotal)) + ' day(s)') +
+            backMenuButton(buyer.id)
+        ));
+    }
+    function handleDeny(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var quote = _.find(allQuotes(), function (q) { return q.id === args.quote; });
+        if (quote) removeQuote(quote.id);
+        send(box('Jeweler Quote', 'Quote removed.' + backMenuButton(buyer ? buyer.id : '')));
+    }
+
+
+    function handleHaggle(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var quote = _.find(allQuotes(), function (q) { return q.id === args.quote; });
+        var target, roll, success, resultText;
+        if (!buyer || !quote || quote.buyerId !== buyer.id) {
+            send(box('Haggle Price', 'Quote not found for this buyer.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        if (quote.haggleDone) {
+            send(box('Haggle Price',
+                line('Item', esc(quote.itemName)) +
+                '<div>Haggling is already finished for this quote.</div>' +
+                backMenuButton(buyer.id)
+            ));
+            return;
+        }
+        target = Math.max(0, Math.min(95, 10 + (Number(quote.reactionBonus) || 0)));
+        roll = randomInteger(100);
+        success = roll <= target;
+        quote.haggleAttempts = (quote.haggleAttempts || 0) + 1;
+        if (quote.kind === 'sale') {
+            if (success) {
+                quote.currentOfferGp = Math.min(quote.baseValueGp, roundGp((quote.currentOfferGp || quote.offerGp) * 1.05));
+                quote.haggleDone = true;
+                resultText = '<span style="color:#8fe38f;font-weight:bold;">Success - dealer improves the offer by 5%.</span>';
+            } else {
+                quote.haggleFailures = (quote.haggleFailures || 0) + 1;
+                quote.lastHaggleComment = randomJewelerSaleComment();
+                if (quote.haggleFailures >= 2) {
+                    quote.currentOfferGp = roundGp((quote.currentOfferGp || quote.offerGp) * 0.90);
+                    quote.haggleDone = true;
+                    resultText = '<span style="color:#ff7b7b;font-weight:bold;">Second failure - dealer lowers the offer by 10% and ends haggling.</span>';
+                } else {
+                    resultText = '<span style="color:#ffb36b;font-weight:bold;">Failure - no change yet. One more haggle attempt remains.</span>';
+                }
+            }
+            send(box('Haggle Result',
+                line('Item', esc(quote.itemName)) +
+                line('Haggle target', esc(String(target)) + '%') +
+                line('Die roll', esc(String(roll))) +
+                line('Result', resultText) +
+                ((!success && quote.lastHaggleComment) ? line('Dealer says', esc(quote.lastHaggleComment)) : '') +
+                line('Current offer', formatCoinsFromGp(quote.currentOfferGp || quote.offerGp)) +
+                '<div style="margin-top:8px;">' +
+                    menuBtn('Sell Item', '!jeweler-accept --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 100) +
+                    (!quote.haggleDone ? menuBtn('Haggle Price', '!jeweler-haggle --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100) : '') +
+                    (!success ? menuBtn('Deny Quote', '!jeweler-deny --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 100) : '') +
+                '</div>' + backMenuButton(buyer.id)
+            ));
+            return;
+        }
+        if (success) {
+            quote.currentServiceChargeGp = Math.max(1, roundGp((quote.currentServiceChargeGp || quote.serviceChargeGp) * 0.95));
+            quote.haggleDone = true;
+            resultText = '<span style="color:#8fe38f;font-weight:bold;">Success - jeweler reduces the service charge by 5%.</span>';
+        } else {
+            quote.haggleFailures = (quote.haggleFailures || 0) + 1;
+            quote.lastHaggleComment = randomHaggleFailComment();
+            if (quote.haggleFailures >= 2) {
+                quote.currentServiceChargeGp = Math.max(1, roundGp((quote.currentServiceChargeGp || quote.serviceChargeGp) * 1.10));
+                quote.haggleDone = true;
+                resultText = '<span style="color:#ff7b7b;font-weight:bold;">Second failure - jeweler raises the service charge by 10% and ends haggling.</span>';
+            } else {
+                resultText = '<span style="color:#ffb36b;font-weight:bold;">Failure - no change yet. One more haggle attempt remains.</span>';
+            }
+        }
+        setQuotePayments(quote);
+        send(box('Haggle Result',
+            line('Item', esc(quote.itemName)) +
+            line('Haggle target', esc(String(target)) + '%') +
+            line('Die roll', esc(String(roll))) +
+            line('Result', resultText) +
+            ((!success && quote.lastHaggleComment) ? line('Jeweler says', esc(quote.lastHaggleComment)) : '') +
+            line('Current total charge', formatCoinsFromGp(quote.currentServiceChargeGp || quote.serviceChargeGp)) +
+            line('Paid now', formatCoinsFromGp(quote.depositGp || 0)) +
+            (quote.balanceGp ? line('Balance on pickup', formatCoinsFromGp(quote.balanceGp || 0)) : '') +
+            '<div style="margin-top:8px;">' +
+                menuBtn('Accept Quote', '!jeweler-accept --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110) +
+                (!quote.haggleDone ? menuBtn('Haggle Price', '!jeweler-haggle --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100) : '') +
+                (!success ? menuBtn('Deny Quote', '!jeweler-deny --pc|' + buyer.id + ' --quote|' + quote.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 100) : '') +
+            '</div>' + backMenuButton(buyer.id)
+        ));
+    }
+
+
+    function handleApplyDays(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var days = Math.max(1, Number(args.days) || 1);
+        var jobs, completed = [];
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        jobs = _.filter(allJobs(), function (j) { return j.buyerId === buyer.id && j.status === 'working'; });
+        if (!jobs.length) {
+            send(box('Jeweler', 'No active jobs for ' + esc(getBuyerName(buyer)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        _.each(jobs, function (job) {
+            job.daysRemaining = Math.max(0, job.daysRemaining - days);
+            if (job.daysRemaining === 0 && job.status === 'working') {
+                completed.push(resolveCompletedJob(job));
+            }
+        });
+
+        send(box('Jeweler Time Applied',
+            line('Buyer', esc(getBuyerName(buyer))) +
+            line('Days applied', esc(String(days))) +
+            line('Active jobs checked', esc(String(jobs.length))) +
+            (completed.length ? line('Jobs completed', esc(String(completed.length))) : line('Jobs completed', '0')) +
+            backMenuButton(buyer.id)
+        ));
+
+        _.each(completed, function (entry) {
+            if (entry.publicHtml) send(entry.publicHtml);
+            if (entry.gmHtml) sendGM(entry.gmHtml);
+        });
+    }
+
+    function handleFinishNow(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var job = _.find(allJobs(), function (j) { return j.id === args.job; });
+        var entry;
+        if (!buyer || !job || job.buyerId !== buyer.id) {
+            send(box('Jeweler', 'Job not found for this buyer.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        if (job.status !== 'working') {
+            send(box('Jeweler', 'This job is not currently waiting for work to be done.' + backMenuButton(buyer.id)));
+            return;
+        }
+        job.daysRemaining = 0;
+        entry = resolveCompletedJob(job);
+        send(box('Jeweler Finish Now',
+            line('Item', esc(job.itemName)) +
+            line('Result', 'The waiting time was bypassed and the job was finished now.') +
+            backMenuButton(buyer.id)
+        ));
+        if (entry.publicHtml) send(entry.publicHtml);
+        if (entry.gmHtml) sendGM(entry.gmHtml);
+    }
+
+
+    function handlePickup(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var job = _.find(allJobs(), function (j) { return j.id === args.job; });
+        var spend;
+        if (!buyer || !job || job.buyerId !== buyer.id) {
+            send(box('Jeweler', 'Job not found for this buyer.' + backMenuButton(buyer ? buyer.id : '')));
+            return;
+        }
+        if (job.status !== 'ready') {
+            send(box('Jeweler', 'This job is not ready for pickup yet.' + backMenuButton(buyer.id)));
+            return;
+        }
+        spend = deductCoins(buyer.id, job.balanceGp || 0);
+        if (!spend.ok) {
+            send(box('Jeweler', 'Not enough coin for pickup. Need ' + esc(formatCoinsFromCp(spend.needCp)) + ', but only have ' + esc(formatCoinsFromCp(spend.haveCp)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        job.status = 'done';
+        job.balanceGp = 0;
+        send(box('Jeweler Pickup',
+            line('Item', esc(job.itemName)) +
+            line('Balance paid', formatCoinsFromCp(spend.spentCp)) +
+            line('Result', 'Job picked up and closed.') +
+            backMenuButton(buyer.id)
+        ));
+    }
+
+
+    function handleReady(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var readyJobs;
+        var body;
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        readyJobs = _.filter(allJobs(), function (j) { return j.buyerId === buyer.id && j.status === 'ready'; });
+        if (!readyJobs.length) {
+            send(box('Ready for Pickup', 'No items are ready for pickup for ' + esc(getBuyerName(buyer)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        body = _.map(readyJobs, function (j) {
+            return '<div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #333;">' +
+                line('Item', esc(j.itemName)) +
+                line('Jeweler', esc(j.jewelerName)) +
+                line('Balance due', formatCoinsFromGp(j.balanceGp || 0)) +
+                menuBtn('Pick Up', '!jeweler-pickup --pc|' + buyer.id + ' --job|' + j.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100) +
+                '</div>';
+        }).join('');
+        send(box('Ready for Pickup', body + backMenuButton(buyer.id)));
+    }
+
+    function handleStoreList(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var size = normalizeText(args.size || 'small');
+        var inventory;
+        var body;
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        inventory = generateStoreInventory(size, buyer);
+        body = line('Buyer', esc(getBuyerName(buyer))) +
+            line('Store size', esc(size.charAt(0).toUpperCase() + size.slice(1))) +
+            '<div style="margin-top:6px;"><b>Stones for Sale</b></div>' +
+            (inventory.gems.length ? _.map(inventory.gems, function (g) {
+                return '<div style="margin-left:8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #333;">' +
+                    '<div>' + esc(g.name) + ' — base ' + formatCoinsFromGp(g.baseGp) + ' — asking ' + formatCoinsFromGp(g.askGp) + '</div>' +
+                    '<div style="margin-top:4px;">' +
+                        menuBtn('Purchase', '!jeweler-store-buy --pc|' + buyer.id + ' --itemname|' + g.name + ' --price|' + g.askGp + ' --kind|stone', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 90) +
+                        menuBtn('Haggle Price', '!jeweler-store-haggle --pc|' + buyer.id + ' --itemname|' + g.name + ' --price|' + g.askGp + ' --kind|stone --attempt|0', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110) +
+                    '</div></div>';
+            }).join('') : '<div style="margin-left:8px;">none</div>') +
+            '<div style="margin-top:6px;"><b>Jewelry for Sale</b></div>' +
+            (inventory.jewelry.length ? _.map(inventory.jewelry, function (j) {
+                var label = j.name + ' (' + j.desc + ')';
+                return '<div style="margin-left:8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #333;">' +
+                    '<div>' + esc(label) + ' — asking ' + formatCoinsFromGp(j.askGp) + '</div>' +
+                    '<div style="margin-top:4px;">' +
+                        menuBtn('Purchase', '!jeweler-store-buy --pc|' + buyer.id + ' --itemname|' + label + ' --price|' + j.askGp + ' --kind|jewelry', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 90) +
+                        menuBtn('Haggle Price', '!jeweler-store-haggle --pc|' + buyer.id + ' --itemname|' + label + ' --price|' + j.askGp + ' --kind|jewelry --attempt|0', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110) +
+                    '</div></div>';
+            }).join('') : '<div style="margin-left:8px;">none</div>') +
+            backMenuButton(buyer.id);
+        send(box('Dealer Inventory', body));
+    }
+
+    function handleStoreBuy(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var price = roundGp(Number(args.price) || 0);
+        var spend;
+        if (!buyer) {
+            send(box('Jeweler', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        spend = deductCoins(buyer.id, price);
+        if (!spend.ok) {
+            send(box('Store Purchase',
+                line('Item', esc(args.itemname || 'Item')) +
+                line('Price', formatCoinsFromGp(price)) +
+                '<div>Not enough coin. Need ' + esc(formatCoinsFromCp(spend.needCp)) + ', but only have ' + esc(formatCoinsFromCp(spend.haveCp)) + '.</div>' +
+                backMenuButton(buyer.id)
+            ));
+            return;
+        }
+        send(box('Store Purchase',
+            line('Buyer', esc(getBuyerName(buyer))) +
+            line('Item', esc(args.itemname || 'Item')) +
+            line('Paid', formatCoinsFromGp(price)) +
+            '<div>Add the purchased item to the character inventory manually.</div>' +
+            backMenuButton(buyer.id)
+        ));
+    }
+
+    function handleStoreHaggle(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var price = roundGp(Number(args.price) || 0);
+        var attempt = Number(args.attempt) || 0;
+        var target, roll, success, resultText, comment = '';
+        if (!buyer) {
+            send(box('Haggle Price', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        target = Math.max(0, Math.min(95, 10 + (getReactionBonus(buyer) || 0)));
+        roll = randomInteger(100);
+        success = roll <= target;
+        if (success) {
+            price = roundGp(price * 0.95);
+            resultText = '<span style="color:#8fe38f;font-weight:bold;">Success - dealer reduces the asking price by 5%.</span>';
+        } else if (attempt >= 1) {
+            price = roundGp(price * 1.10);
+            comment = randomHaggleFailComment();
+            resultText = '<span style="color:#ff7b7b;font-weight:bold;">Second failure - dealer raises the asking price by 10% and ends haggling.</span>';
+        } else {
+            comment = randomHaggleFailComment();
+            resultText = '<span style="color:#ffb36b;font-weight:bold;">Failure - no change yet. One more haggle attempt remains.</span>';
+        }
+        send(box('Haggle Result',
+            line('Item', esc(args.itemname || 'Item')) +
+            line('Haggle target', esc(String(target)) + '%') +
+            line('Die roll', esc(String(roll))) +
+            line('Result', resultText) +
+            (comment ? line('Jeweler says', esc(comment)) : '') +
+            line('Current asking price', formatCoinsFromGp(price)) +
+            '<div style="margin-top:8px;">' +
+                menuBtn('Purchase', '!jeweler-store-buy --pc|' + buyer.id + ' --itemname|' + (args.itemname || 'Item') + ' --price|' + price + ' --kind|' + (args.kind || 'item'), CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 90) +
+                ((!success && attempt < 1) ? menuBtn('Haggle Price', '!jeweler-store-haggle --pc|' + buyer.id + ' --itemname|' + (args.itemname || 'Item') + ' --price|' + price + ' --kind|' + (args.kind || 'item') + ' --attempt|1', CONFIG.colors.primaryBg, CONFIG.colors.primaryBorder, 110) : '') +
+            '</div>' + backMenuButton(buyer.id)
+        ));
+    }
+
+
+    function handleReport(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var body = '';
+        if (!buyer) {
+            send(box('Jeweler Report', 'Select a buyer token first.' + backMenuButton('')));
+            return;
+        }
+        body += line('Buyer', esc(getBuyerName(buyer)));
+        body += line('Available jewelers', esc(String(allJewelers().length)));
+        var quotes = getQuotesForBuyer(buyer.id);
+        var jobs = _.filter(allJobs(), function (j) { return j.buyerId === buyer.id && j.status !== 'done'; });
+        if (quotes.length) {
+            body += '<div style="margin-top:6px;"><b>Open Quotes</b></div>' +
+                _.map(quotes, function (q) {
+                    return '<div style="margin-left:8px;">' + esc(q.itemName) + ' — ' + esc(q.jewelerName) + ' — ' + (q.kind === 'sale' ? 'offer ' + formatCoinsFromGp(q.currentOfferGp || q.offerGp) : formatCoinsFromGp(q.currentServiceChargeGp || q.serviceChargeGp)) + '</div>';
+                }).join('');
+        } else {
+            body += '<div style="margin-top:6px;"><b>Open Quotes</b>: none</div>';
+        }
+        if (jobs.length) {
+            body += '<div style="margin-top:6px;"><b>Jobs</b></div>' +
+                _.map(jobs, function (j) {
+                    var extra = '';
+                    if (j.status === 'ready') {
+                        extra = ' ' + menuBtn('Finish/Pick Up', '!jeweler-pickup --pc|' + buyer.id + ' --job|' + j.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 120);
+                    } else if (j.status === 'working') {
+                        extra = ' ' + menuBtn('Finish Now', '!jeweler-finish-now --pc|' + buyer.id + ' --job|' + j.id, CONFIG.colors.warnBg, CONFIG.colors.warnBorder, 100);
+                    }
+                    return '<div style="margin-left:8px;margin-bottom:6px;">' + esc(j.itemName) + ' — ' + esc(j.jewelerName) +
+                        ' — ' + esc(j.status) + ' — ' + esc(String(j.daysRemaining)) + '/' + esc(String(j.daysTotal)) + ' day(s) remaining' +
+                        ' — total ' + formatCoinsFromGp(j.serviceChargeGp || 0) +
+                        ' — down ' + formatCoinsFromGp(j.depositGp || 0) +
+                        ' — balance ' + formatCoinsFromGp(j.balanceGp || 0) + extra + '</div>';
+                }).join('');
+        } else {
+            body += '<div style="margin-top:6px;"><b>Jobs</b>: none</div>';
+        }
+
+        if (playerIsGMFor(msg)) {
+            var jewelers = _.sortBy(allJewelers(), function (j) { return (j.name || '').toLowerCase(); });
+            body += '<div style="margin-top:6px;"><b>Available Jewelers</b></div>';
+            body += jewelers.length ? _.map(jewelers, function (j) {
+                return '<div style="margin-left:8px;">' + esc(jewelerLabel(j)) + '</div>';
+            }).join('') : '<div style="margin-left:8px;">none</div>';
+        }
+
+        send(box('Jeweler Report', body + backMenuButton(buyer.id)));
+    }
+
+    function handleRemoveList(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        var mine;
+        if (!buyer) {
+            send(box('Jeweler', 'Select an employer token first.' + backMenuButton('')));
+            return;
+        }
+        mine = _.filter(allJewelers(), function (j) { return j.ownerId === buyer.id; });
+        if (!mine.length) {
+            send(box('Jeweler', 'No jeweler-gemcutters are kept by ' + esc(getBuyerName(buyer)) + '.' + backMenuButton(buyer.id)));
+            return;
+        }
+        send(box('Remove Jeweler',
+            _.map(mine, function (j) {
+                return '<div style="margin-bottom:4px;">' + esc(jewelerLabel(j)) + ' ' +
+                    menuBtn('Remove', '!jeweler-remove --pc|' + buyer.id + ' --jeweler|' + j.id, CONFIG.colors.dangerBg, CONFIG.colors.dangerBorder, 80) +
+                    '</div>';
+            }).join('') + backMenuButton(buyer.id)
+        ));
+    }
+
+    function handleRemove(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        state[STATE].jewelers = _.reject(allJewelers(), function (j) { return j.id === args.jeweler; });
+        state[STATE].quotes = _.reject(allQuotes(), function (q) { return q.jewelerId === args.jeweler; });
+        state[STATE].jobs = _.reject(allJobs(), function (j) { return j.jewelerId === args.jeweler && j.status !== 'done'; });
+        send(box('Jeweler', 'Jeweler removed.' + backMenuButton(buyer ? buyer.id : '')));
+    }
+
+    function handleRemoveAll(msg, args) {
+        var buyer = resolveBuyer(msg, args);
+        if (!buyer) {
+            send(box('Jeweler', 'Select an employer token first.' + backMenuButton('')));
+            return;
+        }
+        if (normalizeText(args.confirm) !== 'yes') {
+            send(box('Jeweler', 'Removal cancelled.' + backMenuButton(buyer.id)));
+            return;
+        }
+        var jewelerIds = _.pluck(_.filter(allJewelers(), function (j) { return j.ownerId === buyer.id; }), 'id');
+        state[STATE].jewelers = _.reject(allJewelers(), function (j) { return j.ownerId === buyer.id; });
+        state[STATE].quotes = _.reject(allQuotes(), function (q) { return q.buyerId === buyer.id || _.contains(jewelerIds, q.jewelerId); });
+        state[STATE].jobs = _.reject(allJobs(), function (j) { return j.buyerId === buyer.id || (_.contains(jewelerIds, j.jewelerId) && j.status !== 'done'); });
+        send(box('Jeweler', 'All jeweler data for ' + esc(getBuyerName(buyer)) + ' removed.' + backMenuButton(buyer.id)));
+    }
+
+    function handleReset(msg, args) {
+        if (!playerIsGMFor(msg)) {
+            send(box('Jeweler', 'GM only.'));
+            return;
+        }
+        if (normalizeText(args.confirm) !== 'yes') {
+            send(box('Jeweler', 'Reset cancelled.'));
+            return;
+        }
+        state[STATE] = {
+            version: VERSION,
+            nextJewelerId: 1,
+            nextQuoteId: 1,
+            nextJobId: 1,
+            jewelers: [],
+            quotes: [],
+            jobs: []
+        };
+        send(box('Jeweler', 'Campaign data reset.'));
+    }
+
+    function handleInput(msg) {
+        if (msg.type !== 'api') return;
+        if (!msg.content || msg.content.indexOf('!jeweler') !== 0) return;
+        var command = msg.content.split(/\s+/)[0];
+        var args = parseArgs(msg.content);
+        switch (command) {
+            case '!jeweler-menu': handleMenu(msg, args); break;
+            case '!jeweler-add': handleAddJeweler(msg, args); break;
+            case '!jeweler-select-service': handleSelectService(msg, args); break;
+            case '!jeweler-start-quote': handleStartQuote(msg, args); break;
+            case '!jeweler-quote': handleQuote(msg, args); break;
+            case '!jeweler-open-quotes': handleOpenQuotes(msg, args); break;
+            case '!jeweler-accept': handleAccept(msg, args); break;
+            case '!jeweler-deny': handleDeny(msg, args); break;
+            case '!jeweler-haggle': handleHaggle(msg, args); break;
+            case '!jeweler-apply-days': handleApplyDays(msg, args); break;
+            case '!jeweler-finish-now': handleFinishNow(msg, args); break;
+            case '!jeweler-ready': handleReady(msg, args); break;
+            case '!jeweler-pickup': handlePickup(msg, args); break;
+            case '!jeweler-store-list': handleStoreList(msg, args); break;
+            case '!jeweler-store-buy': handleStoreBuy(msg, args); break;
+            case '!jeweler-store-haggle': handleStoreHaggle(msg, args); break;
+            case '!jeweler-report': handleReport(msg, args); break;
+            case '!jeweler-remove-list': handleRemoveList(msg, args); break;
+            case '!jeweler-remove': handleRemove(msg, args); break;
+            case '!jeweler-remove-all': handleRemoveAll(msg, args); break;
+            case '!jeweler-reset': handleReset(msg, args); break;
+            default: handleMenu(msg, args); break;
+        }
+    }
+
+    function checkInstall() {
+        stateInit();
+        log(SCRIPT + ' v' + VERSION + ' ready.');
+    }
+
+    function registerEventHandlers() {
+        on('chat:message', handleInput);
+    }
+
+    return {
+        CheckInstall: checkInstall,
+        RegisterEventHandlers: registerEventHandlers
+    };
+}());
+
+on('ready', function () {
+    'use strict';
+    Jeweler.CheckInstall();
+    Jeweler.RegisterEventHandlers();
+});
